@@ -3,7 +3,7 @@
 Paper Trader — reads opportunities from bot.py, places virtual trades,
 resolves them, tracks P&L.
 
-Deploy to: /root/paper_trader.py on DigitalOcean droplet 164.92.133.253
+Deploy to: /root/paper_trader.py on DigitalOcean droplet 157.245.73.141
 """
 import json, os, time, logging, requests, sys
 from datetime import datetime, timezone

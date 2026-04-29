@@ -306,7 +306,7 @@ Outcome confirmed by live station data | Edge ≥ {MIN_TAIL_EDGE*100:.0f}¢/shar
 
 | Component | Status |
 |-----------|--------|
-| Droplet | 164.92.133.253 (Frankfurt) |
+| Droplet | 157.245.73.141 |
 | bot.py | polymarket-bot.service |
 | paper_trader.py | paper-trader.service |
 | tail_end_scanner.py | tail-end.service |

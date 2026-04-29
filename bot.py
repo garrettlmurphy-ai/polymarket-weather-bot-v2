@@ -4,7 +4,7 @@ Polymarket Weather Arbitrage Bot — Enhanced
 Three-source ensemble: Open-Meteo + NWS + Tomorrow.io
 Scans directional markets AND narrow bracket markets (Leg 1).
 
-Deploy to: /root/bot.py on DigitalOcean droplet 164.92.133.253
+Deploy to: /root/bot.py on DigitalOcean droplet 157.245.73.141
 """
 import requests, json, math, time, logging, re
 from datetime import datetime, timezone, timedelta
