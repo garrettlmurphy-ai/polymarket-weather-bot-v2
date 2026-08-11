@@ -1,0 +1,17 @@
+# Secrets — never commit
+.env
+
+# Runtime data / logs
+*.log
+paper_trades.json
+opportunities.json
+reports/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/

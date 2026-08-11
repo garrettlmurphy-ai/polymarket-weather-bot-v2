@@ -12,6 +12,7 @@ from config import (
     GAMMA_API, STATE_FILE, PAPER_LOG,
     KELLY_FRACTION, MAX_POSITION_PCT, MAX_STAKE_DOLLARS, MAX_OPEN_POSITIONS,
     MIN_EDGE, SCAN_INTERVAL,
+    TAKER_FEE, HALF_SPREAD, SLIPPAGE, LIQUIDITY_FILL_FRAC,
 )
 
 logging.basicConfig(
@@ -77,41 +78,80 @@ def already_have_position(state, market_id, side):
     return any(t["market_id"] == market_id for t in state["open_trades"])
 
 
+def realistic_fill_price(quoted_price):
+    """
+    Convert a quoted (mid/last) price into the price we'd actually PAY as a taker.
+    The Gamma `outcomePrices` we read is a mid/last quote, not the ask. Live, you
+    cross the spread and eat some slippage on thin books, so the effective cost is
+    higher. Clamped to <1.0 so a fill is always theoretically possible.
+    """
+    fill = quoted_price + HALF_SPREAD + SLIPPAGE
+    return min(fill, 0.999)
+
+
 def place_paper_trade(state, opportunity):
     bankroll = state["bankroll"]
     is_yes   = opportunity["trade"] in ("BUY YES",)
     prob     = opportunity.get("model_prob", 0.5) if is_yes else 1 - opportunity.get("model_prob", 0.5)
-    price    = opportunity["yes_price"] if is_yes else opportunity["no_price"]
+    quoted   = opportunity["yes_price"] if is_yes else opportunity["no_price"]
     side     = "Yes" if is_yes else "No"
 
-    if price <= 0 or price >= 1:
+    if quoted <= 0 or quoted >= 1:
         return None
 
-    b     = (1 - price) / price
+    # Model the price we'd actually pay as a taker (spread + slippage + fee).
+    price = realistic_fill_price(quoted)
+    price_after_fee = min(price + TAKER_FEE, 0.999)
+    if price_after_fee >= 1:
+        return None
+
+    # Recompute the edge AFTER costs — a nominal edge can vanish once we pay the ask.
+    net_edge = prob - price_after_fee
+    if net_edge < MIN_EDGE:
+        log.debug(
+            f"SKIP (net edge {net_edge*100:+.1f}% < {MIN_EDGE*100:.0f}% after costs): "
+            f"{opportunity['question'][:60]}"
+        )
+        return None
+
+    b     = (1 - price_after_fee) / price_after_fee
     kelly = max(0, (prob * b - (1 - prob)) / b)
     stake = min(
         bankroll * kelly * KELLY_FRACTION,
         bankroll * MAX_POSITION_PCT,
-        MAX_STAKE_DOLLARS,          # hard cap: max $15 per trade
+        MAX_STAKE_DOLLARS,          # hard cap per trade (see config)
     )
+
+    # Cap stake to a realistic share of the market's posted liquidity — you can't
+    # assume you fill your whole size on a thin book.
+    liquidity = float(opportunity.get("liquidity") or 0)
+    if liquidity > 0:
+        stake = min(stake, liquidity * LIQUIDITY_FILL_FRAC)
+
     stake = round(max(stake, 0.50), 2)
     if stake > bankroll:
         return None
 
-    shares = stake / price
+    shares = stake / price_after_fee
     trade = {
-        "id":             f"PT{int(time.time())}",
+        "id":             f"PT{int(time.time()*1000)}",
         "market_id":      opportunity["id"],
         "question":       opportunity["question"],
         "city":           opportunity.get("city", ""),
         "market_type":    opportunity.get("market_type", "directional"),
         "side":           side,
-        "entry_price":    price,
+        "quoted_price":   quoted,
+        "entry_price":    price_after_fee,
         "stake":          stake,
         "shares":         shares,
-        "edge_at_entry":  opportunity.get("edge", 0),
-        "model_prob":     opportunity.get("model_prob", prob),
+        "edge_at_entry":  net_edge,
+        "gross_edge":     opportunity.get("edge", 0),
+        "model_prob":     prob,
         "kelly_pct":      kelly * 100,
+        # Fields needed to recalibrate sigma later (see calibrate.py)
+        "threshold_f":    opportunity.get("threshold_f"),
+        "direction":      opportunity.get("direction"),
+        "forecast_mus":   opportunity.get("forecast_mus"),
         "end_date":       opportunity.get("end_date"),
         "opened_at":      datetime.now(timezone.utc).isoformat(),
         "status":         "open",
@@ -122,8 +162,8 @@ def place_paper_trade(state, opportunity):
     state["open_trades"].append(trade)
     save_state(state)
     log.info(
-        f"📝 {trade['id']} [{trade['market_type']}] BUY {side} @ {price:.3f} | "
-        f"Stake: ${stake:.2f} | Edge: {opportunity.get('edge',0)*100:+.1f}% | "
+        f"📝 {trade['id']} [{trade['market_type']}] BUY {side} @ {price_after_fee:.3f} "
+        f"(quoted {quoted:.3f}) | Stake: ${stake:.2f} | Net edge: {net_edge*100:+.1f}% | "
         f"Sources: {trade['n_sources']}"
     )
     return trade

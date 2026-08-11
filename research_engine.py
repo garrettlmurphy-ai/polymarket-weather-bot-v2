@@ -56,7 +56,7 @@ def load_opportunities():
         with open(OPPORTUNITIES_F) as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"directional": [], "bracket_leg1": [], "tail_end": []}
+        return {"directional": [], "bracket_leg1": [], "known_outcome": []}
 
 
 def load_paper_trades():
@@ -166,12 +166,12 @@ def _tail_end_opps_section(opps):
         return "_No tail-end opportunities (scanner may be outside active window or all markets near 99¢)._\n"
     rows = ["| Market | City | Observed | Threshold | BUY | Entry | Edge | Return | Vol |",
             "|--------|------|----------|-----------|-----|-------|------|--------|-----|"]
-    for o in sorted(opps, key=lambda x: x["tail_edge"], reverse=True)[:10]:
+    for o in sorted(opps, key=lambda x: x["edge"], reverse=True)[:10]:
         rows.append(
             f"| {o['question'][:45]}… | {o['city'].title()} | "
             f"{o['current_temp_f']:.1f}°F | {o['threshold_f']:.1f}°F {o['direction']} | "
             f"{o['winning_side']} | {o['entry_price']*100:.1f}¢ | "
-            f"{o['tail_edge']*100:.1f}¢ | {o['return_pct']:.1f}% | "
+            f"{o['edge']*100:.1f}¢ | {o['return_pct']:.1f}% | "
             f"${o['volume']:,.0f} |"
         )
     return "\n".join(rows) + "\n"
@@ -182,7 +182,7 @@ def _strategy_notes_section(opps_data, pt):
     notes = []
     d = opps_data.get("directional", [])
     b = opps_data.get("bracket_leg1", [])
-    t = opps_data.get("tail_end", [])
+    t = opps_data.get("known_outcome", [])
 
     if d:
         top = max(d, key=lambda x: abs(x["edge"]))
@@ -195,7 +195,7 @@ def _strategy_notes_section(opps_data, pt):
             f"- **Bracket Leg-1:** {len(b)} NO trades available above {MIN_BRACKET_NO_PRICE*100:.0f}¢ threshold"
         )
     if t:
-        best = max(t, key=lambda x: x["tail_edge"])
+        best = max(t, key=lambda x: x["edge"])
         notes.append(
             f"- **Best tail-end trade:** BUY {best['winning_side']} @ {best['entry_price']*100:.1f}¢ "
             f"on *{best['question'][:60]}* — {best['return_pct']:.1f}% return, near risk-free"
@@ -222,10 +222,10 @@ def generate_report(vault_root=None):
     pm_stats   = fetch_polymarket_stats()
 
     scan_time  = opps_data.get("scan_time", "unknown")
-    tail_time  = opps_data.get("tail_scan_time", "not run yet")
+    tail_time  = opps_data.get("known_scan_time", "not run yet")
     d_opps     = opps_data.get("directional", [])
     b_opps     = opps_data.get("bracket_leg1", [])
-    t_opps     = opps_data.get("tail_end", [])
+    t_opps     = opps_data.get("known_outcome", [])
     total_opps = len(d_opps) + len(b_opps) + len(t_opps)
 
     report = f"""---

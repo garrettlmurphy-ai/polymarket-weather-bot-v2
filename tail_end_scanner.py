@@ -75,6 +75,8 @@ def get_noaa_current(station_id):
 
 def get_tomorrow_realtime(lat, lon):
     """Current temperature in °F via Tomorrow.io realtime (international cities)."""
+    if not TOMORROW_IO_KEY:
+        return None, None
     try:
         r = requests.get(
             TOMORROW_REALTIME,

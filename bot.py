@@ -13,7 +13,7 @@ from scipy import stats
 from config import (
     GAMMA_API, OPEN_METEO_API, NWS_API, TOMORROW_FORECAST,
     TOMORROW_IO_KEY, TOMORROW_WEIGHT,
-    MIN_EDGE, MIN_BRACKET_NO_PRICE, SIGMA_BY_DAY,
+    MIN_EDGE, MIN_BRACKET_NO_PRICE, SIGMA_BY_DAY, SIGMA_BRACKET,
     MIN_VOLUME, MIN_LIQUIDITY, YES_PRICE_FLOOR, NO_PRICE_FLOOR, SPREAD_COST,
     MAX_DAYS_OUT, SOURCE_DISAGREE_MAX_F,
     WEATHER_KEYWORDS,
@@ -214,6 +214,7 @@ def get_open_meteo(lat, lon, target_date=None):
         r.raise_for_status()
         d = r.json()
         today = datetime.now(timezone.utc).date()
+        entry = None
         for i, ds in enumerate(d["daily"]["time"]):
             date = datetime.strptime(ds, "%Y-%m-%d").date()
             days_out = (date - today).days
@@ -261,6 +262,8 @@ def get_tomorrow_io(lat, lon, target_date=None):
     Fetch Tomorrow.io daily forecast.
     Returns dict with high_f, low_f, sigma for target_date (or nearest day).
     """
+    if not TOMORROW_IO_KEY:
+        return None
     try:
         r = requests.get(
             TOMORROW_FORECAST,
@@ -279,6 +282,7 @@ def get_tomorrow_io(lat, lon, target_date=None):
         data = r.json()
         today = datetime.now(timezone.utc).date()
         timelines = data.get("timelines", {}).get("daily", [])
+        entry = None
         for day in timelines:
             ds = day["time"][:10]  # "2026-04-08T..."
             date = datetime.strptime(ds, "%Y-%m-%d").date()
@@ -294,7 +298,7 @@ def get_tomorrow_io(lat, lon, target_date=None):
             entry = {"date": ds, "days_out": days_out, "high_f": high_f, "low_f": low_f, "sigma": sigma}
             if target_date and ds == target_date:
                 return entry
-        return entry if timelines and not target_date else None
+        return entry if not target_date else None
     except Exception as e:
         log.error(f"Tomorrow.io forecast error: {e}")
         return None
@@ -340,15 +344,20 @@ def build_ensemble(city_name, lat, lon, target_date, question_lower, sigma_table
     use_high = "high" in question_lower
     use_low  = "low"  in question_lower
 
+    def _sigma_for(days_out):
+        # Derive sigma from the requested table (SIGMA_BY_DAY for directional,
+        # SIGMA_BRACKET for brackets) rather than the value baked in at fetch time.
+        return sigma_table.get(days_out, 12.0)
+
     if "open_meteo" in raw:
         om = raw["open_meteo"]
         mu = om["high_f"] if use_high else om["low_f"] if use_low else (om["high_f"] + om["low_f"]) / 2
-        forecasts.append({"mu": mu, "sigma": om["sigma"], "weight": 1.0, "src": "open-meteo"})
+        forecasts.append({"mu": mu, "sigma": _sigma_for(om["days_out"]), "weight": 1.0, "src": "open-meteo"})
 
     if "tomorrow_io" in raw:
         tm = raw["tomorrow_io"]
         mu = tm["high_f"] if use_high else tm["low_f"] if use_low else (tm["high_f"] + tm["low_f"]) / 2
-        forecasts.append({"mu": mu, "sigma": tm["sigma"], "weight": TOMORROW_WEIGHT, "src": "tomorrow.io"})
+        forecasts.append({"mu": mu, "sigma": _sigma_for(tm["days_out"]), "weight": TOMORROW_WEIGHT, "src": "tomorrow.io"})
 
     if "nws_temp" in raw:
         sigma_nws = sigma_table.get(1, 4.5)
@@ -440,6 +449,9 @@ def analyze_directional(market_raw):
         "model_prob": model_prob, "edge": edge, "trade": trade,
         "ev": ev, "kelly": kelly, "sources": src,
         "n_sources": len(forecasts),
+        # Raw forecast components — persisted on trades for sigma recalibration
+        "forecast_mus":     [f["mu"] for f in forecasts],
+        "forecast_weights": [f["weight"] for f in forecasts],
     }
 
 
@@ -464,7 +476,9 @@ def analyze_bracket_leg1(market_raw):
     lat, lon = info["coords"]
     # Use API endDate (YYYY-MM-DD) as target — question text never has ISO dates
     target_date = (parsed.get("end_date") or "")[:10] or None
-    forecasts = build_ensemble(info["city"], lat, lon, target_date, parsed["question"].lower())
+    # Brackets use the tighter, recalibrated sigma table (point-forecast precision)
+    forecasts = build_ensemble(info["city"], lat, lon, target_date, parsed["question"].lower(),
+                               sigma_table=SIGMA_BRACKET)
     if not forecasts:
         return None
 

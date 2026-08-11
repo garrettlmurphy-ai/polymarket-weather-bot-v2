@@ -1,16 +1,40 @@
 #!/usr/bin/env python3
 """
 Unified configuration for all Polymarket bots.
-Keys loaded here; imported everywhere else.
+Secrets are loaded from the environment (see .env.example); never hard-code them.
 """
+import os
+
+# Load a local .env file if present (optional dependency).
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # Minimal fallback so a .env still works without python-dotenv installed.
+    _env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(_env_path):
+        with open(_env_path) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
 # ─────────────────────────────────────────────
-# API Keys
+# API Keys — loaded from environment, never committed
 # ─────────────────────────────────────────────
-TOMORROW_IO_KEY = "U4WLBud8PUpOgna48rLh1QFvi0BAalsA"
-BINANCE_KEY     = "7BnK7TcxNXaySXvdccvQKYLsN6vVdlRyMdPojIjPF91H7w8QnnD9iOXmrMT2i1Rf"
-OKX_KEY         = "dd0f40f8-15af-4e9a-969b-c7fb75ae06ee"
-OKX_SECRET      = "46A7DD81480E659901A63CBD4C3AA175"
+TOMORROW_IO_KEY = os.getenv("TOMORROW_IO_KEY", "")
+BINANCE_KEY     = os.getenv("BINANCE_KEY", "")
+OKX_KEY         = os.getenv("OKX_KEY", "")
+OKX_SECRET      = os.getenv("OKX_SECRET", "")
+
+if not TOMORROW_IO_KEY:
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "TOMORROW_IO_KEY not set — Tomorrow.io sources will be skipped. "
+        "Copy .env.example to .env and fill in your keys."
+    )
 
 # ─────────────────────────────────────────────
 # API Endpoints
@@ -42,6 +66,14 @@ MAX_DAYS_OUT         = 1      # main scanner: today + tomorrow only
 KNOWN_OUTCOME_DAYS   = 0      # known-outcome scanner: TODAY only (resolving in <24h)
 SOURCE_DISAGREE_MAX_F = 8.0   # skip trade if sources disagree by more than this
 SCAN_INTERVAL        = 600    # 10 min between scans
+
+# ─────────────────────────────────────────────
+# Realistic execution costs (used by paper_trader to make sim P&L predict live)
+# ─────────────────────────────────────────────
+TAKER_FEE            = 0.00   # Polymarket CLOB taker fee fraction (set per current fee schedule)
+HALF_SPREAD          = 0.01   # assumed half-spread paid when crossing to the ask (¢ per share)
+SLIPPAGE             = 0.005  # extra adverse fill assumption on thin books
+LIQUIDITY_FILL_FRAC  = 0.10   # never assume a fill larger than this fraction of book liquidity
 
 # Tomorrow.io weight in ensemble (higher = more trusted)
 # Open-Meteo: 1.0, NWS: 0.8, Tomorrow.io: 1.1 (premium global model)
@@ -111,11 +143,17 @@ WEATHER_KEYWORDS = [
 ]
 
 # ─────────────────────────────────────────────
-# File paths (droplet)
+# File paths
+# Override the base dir with DATA_DIR env var (defaults to /root on the droplet,
+# or the repo directory when /root isn't writable — e.g. local dev).
 # ─────────────────────────────────────────────
-STATE_FILE       = "/root/paper_trades.json"
-BOT_LOG          = "/root/bot.log"
-PAPER_LOG        = "/root/paper_trader.log"
-TAIL_LOG         = "/root/tail_end.log"
-RESEARCH_LOG     = "/root/research_engine.log"
-OPPORTUNITIES_F  = "/root/opportunities.json"   # live feed between scanners
+_DEFAULT_DATA_DIR = "/root" if os.path.isdir("/root") and os.access("/root", os.W_OK) \
+                    else os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.getenv("DATA_DIR", _DEFAULT_DATA_DIR)
+
+STATE_FILE       = os.path.join(DATA_DIR, "paper_trades.json")
+BOT_LOG          = os.path.join(DATA_DIR, "bot.log")
+PAPER_LOG        = os.path.join(DATA_DIR, "paper_trader.log")
+TAIL_LOG         = os.path.join(DATA_DIR, "tail_end.log")
+RESEARCH_LOG     = os.path.join(DATA_DIR, "research_engine.log")
+OPPORTUNITIES_F  = os.path.join(DATA_DIR, "opportunities.json")   # live feed between scanners

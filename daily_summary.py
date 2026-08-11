@@ -2,11 +2,15 @@
 import json, os, requests
 from datetime import datetime, timezone
 
-TELEGRAM_TOKEN = "8400301663:AAFwI_BsN0CeeLvEqGuFHz-UAw2-k7ahOSM"
-CHAT_ID = "633297295"
-STATE_FILE = "/root/paper_trades.json"
+from config import STATE_FILE  # loads .env and resolves DATA_DIR
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 def send_telegram(msg):
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("TELEGRAM_TOKEN / TELEGRAM_CHAT_ID not set — printing summary instead of sending.")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
 
